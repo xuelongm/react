@@ -23,9 +23,11 @@ import useContextMenu from '../../ContextMenu/useContextMenu';
 import {meta} from '../../../hydration';
 import {getHookSourceLocationKey} from 'react-devtools-shared/src/hookNamesCache';
 import {
-  enableHookNameParsing,
+  enableNamedHooksFeature,
   enableProfilerChangedHookIndices,
 } from 'react-devtools-feature-flags';
+import HookNamesModuleLoaderContext from 'react-devtools-shared/src/devtools/views/Components/HookNamesModuleLoaderContext';
+import isArray from 'react-devtools-shared/src/isArray';
 
 import type {InspectedElement} from './types';
 import type {HooksNode, HooksTree} from 'react-debug-tools/src/ReactDebugHooks';
@@ -65,6 +67,8 @@ export function InspectedElementHooksTree({
     toggleParseHookNames();
   };
 
+  const hookNamesModuleLoader = useContext(HookNamesModuleLoaderContext);
+
   const hookParsingFailed = parseHookNames && hookNames === null;
 
   let toggleTitle;
@@ -82,19 +86,24 @@ export function InspectedElementHooksTree({
     return null;
   } else {
     return (
-      <div className={styles.HooksTreeView}>
+      <div
+        className={styles.HooksTreeView}
+        data-testname="InspectedElementHooksTree">
         <div className={styles.HeaderRow}>
           <div className={styles.Header}>hooks</div>
-          {enableHookNameParsing && (!parseHookNames || hookParsingFailed) && (
-            <Toggle
-              className={hookParsingFailed ? styles.ToggleError : null}
-              isChecked={parseHookNamesOptimistic}
-              isDisabled={parseHookNamesOptimistic || hookParsingFailed}
-              onChange={handleChange}
-              title={toggleTitle}>
-              <ButtonIcon type="parse-hook-names" />
-            </Toggle>
-          )}
+          {enableNamedHooksFeature &&
+            typeof hookNamesModuleLoader === 'function' &&
+            (!parseHookNames || hookParsingFailed) && (
+              <Toggle
+                className={hookParsingFailed ? styles.ToggleError : null}
+                isChecked={parseHookNamesOptimistic}
+                isDisabled={parseHookNamesOptimistic || hookParsingFailed}
+                onChange={handleChange}
+                testName="LoadHookNamesButton"
+                title={toggleTitle}>
+                <ButtonIcon type="parse-hook-names" />
+              </Toggle>
+            )}
           <Button onClick={handleCopy} title="Copy to clipboard">
             <ButtonIcon type="copy" />
           </Button>
@@ -221,7 +230,7 @@ function HookView({
 
   let name = hook.name;
   if (enableProfilerChangedHookIndices) {
-    if (!isCustomHook) {
+    if (hookID !== null) {
       name = (
         <>
           <span className={styles.PrimitiveHookNumber}>{hookID + 1}</span>
@@ -261,7 +270,7 @@ function HookView({
     displayValue = 'null';
   } else if (value === undefined) {
     displayValue = null;
-  } else if (Array.isArray(value)) {
+  } else if (isArray(value)) {
     isComplexDisplayValue = true;
     displayValue = 'Array';
   } else if (type === 'object') {
@@ -270,7 +279,7 @@ function HookView({
   }
 
   if (isCustomHook) {
-    const subHooksView = Array.isArray(subHooks) ? (
+    const subHooksView = isArray(subHooks) ? (
       <InnerHooksTreeView
         element={element}
         hooks={subHooks}

@@ -36,6 +36,7 @@ import {
   UIManager,
   legacySendAccessibilityEvent,
 } from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
+import {getInspectorDataForInstance} from './ReactNativeFiberInspector';
 
 import {getClosestInstanceFromNode} from './ReactNativeComponentTree';
 import {
@@ -191,6 +192,12 @@ function sendAccessibilityEvent(handle: any, eventType: string) {
   }
 }
 
+function onRecoverableError(error) {
+  // TODO: Expose onRecoverableError option to userspace
+  // eslint-disable-next-line react-internal/no-production-logging, react-internal/warning-args
+  console.error(error);
+}
+
 function render(
   element: Element<ElementType>,
   containerTag: number,
@@ -201,7 +208,17 @@ function render(
   if (!root) {
     // TODO (bvaughn): If we decide to keep the wrapper component,
     // We could create a wrapper for containerTag as well to reduce special casing.
-    root = createContainer(containerTag, LegacyRoot, false, null, false, null);
+    root = createContainer(
+      containerTag,
+      LegacyRoot,
+      false,
+      null,
+      false,
+      null,
+      '',
+      onRecoverableError,
+      null,
+    );
     roots.set(containerTag, root);
   }
   updateContainer(element, root, null, callback);
@@ -264,6 +281,9 @@ export {
   createPortal,
   batchedUpdates as unstable_batchedUpdates,
   Internals as __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED,
+  // This export is typically undefined in production builds.
+  // See the "enableGetInspectorDataForInstanceInProduction" flag.
+  getInspectorDataForInstance,
 };
 
 injectIntoDevTools({

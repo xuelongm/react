@@ -28,6 +28,8 @@ describe('ReactFiberHostContext', () => {
       .DefaultEventPriority;
   });
 
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+
   // @gate __DEV__
   it('works with null host context', async () => {
     let creates = 0;
@@ -71,6 +73,9 @@ describe('ReactFiberHostContext', () => {
       /* root: */ null,
       ConcurrentRoot,
       false,
+      null,
+      false,
+      '',
       null,
     );
     act(() => {
@@ -132,6 +137,9 @@ describe('ReactFiberHostContext', () => {
       rootContext,
       ConcurrentRoot,
       false,
+      null,
+      false,
+      '',
       null,
     );
     act(() => {

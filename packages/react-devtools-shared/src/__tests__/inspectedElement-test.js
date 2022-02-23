@@ -35,6 +35,11 @@ describe('InspectedElement', () => {
   let legacyRender;
   let testRendererInstance;
 
+  let ErrorBoundary;
+  let errorBoundaryInstance;
+
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+
   beforeEach(() => {
     utils = require('./utils');
     utils.beforeEachProfiling();
@@ -66,9 +71,28 @@ describe('InspectedElement', () => {
       .TreeContextController;
 
     // Used by inspectElementAtIndex() helper function
-    testRendererInstance = TestRenderer.create(null, {
-      unstable_isConcurrent: true,
+    utils.act(() => {
+      testRendererInstance = TestRenderer.create(null, {
+        unstable_isConcurrent: true,
+      });
     });
+
+    errorBoundaryInstance = null;
+
+    ErrorBoundary = class extends React.Component {
+      state = {error: null};
+      componentDidCatch(error) {
+        this.setState({error});
+      }
+      render() {
+        errorBoundaryInstance = this;
+
+        if (this.state.error) {
+          return null;
+        }
+        return this.props.children;
+      }
+    };
   });
 
   afterEach(() => {
@@ -109,7 +133,11 @@ describe('InspectedElement', () => {
 
   function noop() {}
 
-  async function inspectElementAtIndex(index, useCustomHook = noop) {
+  async function inspectElementAtIndex(
+    index,
+    useCustomHook = noop,
+    shouldThrow = false,
+  ) {
     let didFinish = false;
     let inspectedElement = null;
 
@@ -124,17 +152,21 @@ describe('InspectedElement', () => {
 
     await utils.actAsync(() => {
       testRendererInstance.update(
-        <Contexts
-          defaultSelectedElementID={id}
-          defaultSelectedElementIndex={index}>
-          <React.Suspense fallback={null}>
-            <Suspender id={id} index={index} />
-          </React.Suspense>
-        </Contexts>,
+        <ErrorBoundary>
+          <Contexts
+            defaultSelectedElementID={id}
+            defaultSelectedElementIndex={index}>
+            <React.Suspense fallback={null}>
+              <Suspender id={id} index={index} />
+            </React.Suspense>
+          </Contexts>
+        </ErrorBoundary>,
       );
     }, false);
 
-    expect(didFinish).toBe(true);
+    if (!shouldThrow) {
+      expect(didFinish).toBe(true);
+    }
 
     return inspectedElement;
   }
@@ -157,6 +189,12 @@ describe('InspectedElement', () => {
         "events": undefined,
         "hooks": Array [
           Object {
+            "hookSource": Object {
+              "columnNumber": "removed by Jest serializer",
+              "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+              "functionName": "Example",
+              "lineNumber": "removed by Jest serializer",
+            },
             "id": 0,
             "isStateEditable": true,
             "name": "State",
@@ -170,6 +208,7 @@ describe('InspectedElement', () => {
           "a": 1,
           "b": "abc",
         },
+        "rootType": "render()",
         "state": null,
       }
     `);
@@ -262,9 +301,14 @@ describe('InspectedElement', () => {
       // from props like defaultSelectedElementID and it's easier to reset here than
       // to read the TreeDispatcherContext and update the selected ID that way.
       // We're testing the inspected values here, not the context wiring, so that's ok.
-      testRendererInstance = TestRenderer.create(null, {
-        unstable_isConcurrent: true,
-      });
+      utils.withErrorsOrWarningsIgnored(
+        ['An update to %s inside a test was not wrapped in act'],
+        () => {
+          testRendererInstance = TestRenderer.create(null, {
+            unstable_isConcurrent: true,
+          });
+        },
+      );
 
       const inspectedElement = await inspectElementAtIndex(index);
 
@@ -375,6 +419,72 @@ describe('InspectedElement', () => {
         "b": "def",
       }
     `);
+  });
+
+  // See github.com/facebook/react/issues/22241#issuecomment-931299972
+  it('should properly recover from a cache miss on the frontend', async () => {
+    let targetRenderCount = 0;
+
+    const Wrapper = ({children}) => children;
+    const Target = React.memo(props => {
+      targetRenderCount++;
+      // Even though his hook isn't referenced, it's used to observe backend rendering.
+      React.useState(0);
+      return null;
+    });
+
+    const container = document.createElement('div');
+    await utils.actAsync(() =>
+      legacyRender(
+        <Wrapper>
+          <Target a={1} b="abc" />
+        </Wrapper>,
+        container,
+      ),
+    );
+
+    targetRenderCount = 0;
+
+    let inspectedElement = await inspectElementAtIndex(1);
+    expect(targetRenderCount).toBe(1);
+    expect(inspectedElement.props).toMatchInlineSnapshot(`
+      Object {
+        "a": 1,
+        "b": "abc",
+      }
+    `);
+
+    const prevInspectedElement = inspectedElement;
+
+    // This test causes an intermediate error to be logged but we can ignore it.
+    console.error = () => {};
+
+    // Wait for our check-for-updates poll to get the new data.
+    jest.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    // Clear the frontend cache to simulate DevTools being closed and re-opened.
+    // The backend still thinks the most recently-inspected element is still cached,
+    // so the frontend needs to tell it to resend a full value.
+    // We can verify this by asserting that the component is re-rendered again.
+    utils.withErrorsOrWarningsIgnored(
+      ['An update to %s inside a test was not wrapped in act'],
+      () => {
+        testRendererInstance = TestRenderer.create(null, {
+          unstable_isConcurrent: true,
+        });
+      },
+    );
+
+    const {
+      clearCacheForTests,
+    } = require('react-devtools-shared/src/inspectedElementMutableSource');
+    clearCacheForTests();
+
+    targetRenderCount = 0;
+    inspectedElement = await inspectElementAtIndex(1);
+    expect(targetRenderCount).toBe(1);
+    expect(inspectedElement).toEqual(prevInspectedElement);
   });
 
   it('should temporarily disable console logging when re-running a component to inspect its hooks', async () => {
@@ -1041,6 +1151,12 @@ describe('InspectedElement', () => {
     expect(inspectedElement.hooks).toMatchInlineSnapshot(`
       Array [
         Object {
+          "hookSource": Object {
+            "columnNumber": "removed by Jest serializer",
+            "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+            "functionName": "Example",
+            "lineNumber": "removed by Jest serializer",
+          },
           "id": 0,
           "isStateEditable": true,
           "name": "State",
@@ -1062,6 +1178,12 @@ describe('InspectedElement', () => {
     expect(inspectedElement.hooks).toMatchInlineSnapshot(`
       Array [
         Object {
+          "hookSource": Object {
+            "columnNumber": "removed by Jest serializer",
+            "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+            "functionName": "Example",
+            "lineNumber": "removed by Jest serializer",
+          },
           "id": 0,
           "isStateEditable": true,
           "name": "State",
@@ -1547,6 +1669,12 @@ describe('InspectedElement', () => {
         "events": undefined,
         "hooks": Array [
           Object {
+            "hookSource": Object {
+              "columnNumber": "removed by Jest serializer",
+              "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+              "functionName": "Example",
+              "lineNumber": "removed by Jest serializer",
+            },
             "id": null,
             "isStateEditable": false,
             "name": "Context",
@@ -1560,6 +1688,7 @@ describe('InspectedElement', () => {
           "a": 1,
           "b": "abc",
         },
+        "rootType": "render()",
         "state": null,
       }
     `);
@@ -1799,11 +1928,23 @@ describe('InspectedElement', () => {
     expect(hooks).toMatchInlineSnapshot(`
       Array [
         Object {
+          "hookSource": Object {
+            "columnNumber": "removed by Jest serializer",
+            "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+            "functionName": "DisplayedComplexValue",
+            "lineNumber": "removed by Jest serializer",
+          },
           "id": null,
           "isStateEditable": false,
           "name": "DebuggableHook",
           "subHooks": Array [
             Object {
+              "hookSource": Object {
+                "columnNumber": "removed by Jest serializer",
+                "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+                "functionName": "useDebuggableHook",
+                "lineNumber": "removed by Jest serializer",
+              },
               "id": 0,
               "isStateEditable": true,
               "name": "State",
@@ -1859,6 +2000,153 @@ describe('InspectedElement', () => {
     `);
   });
 
+  // Regression test for github.com/facebook/react/issues/22099
+  it('should not error when an unchanged component is re-inspected after component filters changed', async () => {
+    const Example = () => <div />;
+
+    const container = document.createElement('div');
+    await utils.actAsync(() => legacyRender(<Example />, container));
+
+    // Select/inspect element
+    let inspectedElement = await inspectElementAtIndex(0);
+    expect(inspectedElement).toMatchInlineSnapshot(`
+      Object {
+        "context": null,
+        "events": undefined,
+        "hooks": null,
+        "id": 2,
+        "owners": null,
+        "props": Object {},
+        "rootType": "render()",
+        "state": null,
+      }
+    `);
+
+    await utils.actAsync(async () => {
+      // Ignore transient warning this causes
+      utils.withErrorsOrWarningsIgnored(['No element found with id'], () => {
+        store.componentFilters = [];
+
+        // Flush events to the renderer.
+        jest.runOnlyPendingTimers();
+      });
+    }, false);
+
+    // HACK: Recreate TestRenderer instance because we rely on default state values
+    // from props like defaultSelectedElementID and it's easier to reset here than
+    // to read the TreeDispatcherContext and update the selected ID that way.
+    // We're testing the inspected values here, not the context wiring, so that's ok.
+    utils.withErrorsOrWarningsIgnored(
+      ['An update to %s inside a test was not wrapped in act'],
+      () => {
+        testRendererInstance = TestRenderer.create(null, {
+          unstable_isConcurrent: true,
+        });
+      },
+    );
+
+    // Select/inspect the same element again
+    inspectedElement = await inspectElementAtIndex(0);
+    expect(inspectedElement).toMatchInlineSnapshot(`
+      Object {
+        "context": null,
+        "events": undefined,
+        "hooks": null,
+        "id": 2,
+        "owners": null,
+        "props": Object {},
+        "rootType": "render()",
+        "state": null,
+      }
+    `);
+  });
+
+  it('should display the root type for ReactDOM.hydrate', async () => {
+    const Example = () => <div />;
+
+    await utils.actAsync(() => {
+      const container = document.createElement('div');
+      container.innerHTML = '<div></div>';
+      withErrorsOrWarningsIgnored(
+        ['ReactDOM.hydrate is no longer supported in React 18'],
+        () => {
+          ReactDOM.hydrate(<Example />, container);
+        },
+      );
+    }, false);
+
+    const inspectedElement = await inspectElementAtIndex(0);
+    expect(inspectedElement.rootType).toMatchInlineSnapshot(`"hydrate()"`);
+  });
+
+  it('should display the root type for ReactDOM.render', async () => {
+    const Example = () => <div />;
+
+    await utils.actAsync(() => {
+      const container = document.createElement('div');
+      legacyRender(<Example />, container);
+    }, false);
+
+    const inspectedElement = await inspectElementAtIndex(0);
+    expect(inspectedElement.rootType).toMatchInlineSnapshot(`"render()"`);
+  });
+
+  it('should display the root type for ReactDOM.hydrateRoot', async () => {
+    const Example = () => <div />;
+
+    await utils.actAsync(() => {
+      const container = document.createElement('div');
+      container.innerHTML = '<div></div>';
+      ReactDOM.hydrateRoot(container).render(<Example />);
+    }, false);
+
+    const inspectedElement = await inspectElementAtIndex(0);
+    expect(inspectedElement.rootType).toMatchInlineSnapshot(`"hydrateRoot()"`);
+  });
+
+  it('should display the root type for ReactDOM.createRoot', async () => {
+    const Example = () => <div />;
+
+    await utils.actAsync(() => {
+      const container = document.createElement('div');
+      ReactDOM.createRoot(container).render(<Example />);
+    }, false);
+
+    const inspectedElement = await inspectElementAtIndex(0);
+    expect(inspectedElement.rootType).toMatchInlineSnapshot(`"createRoot()"`);
+  });
+
+  it('should gracefully surface backend errors on the frontend rather than timing out', async () => {
+    spyOn(console, 'error');
+
+    let shouldThrow = false;
+
+    const Example = () => {
+      const [count] = React.useState(0);
+
+      if (shouldThrow) {
+        throw Error('Expected');
+      } else {
+        return count;
+      }
+    };
+
+    await utils.actAsync(() => {
+      const container = document.createElement('div');
+      ReactDOM.createRoot(container).render(<Example />);
+    }, false);
+
+    shouldThrow = true;
+
+    const value = await inspectElementAtIndex(0, noop, true);
+
+    expect(value).toBe(null);
+
+    const error = errorBoundaryInstance.state.error;
+    expect(error.message).toBe('Expected');
+    expect(error.stack).toContain('inspectHooksOfFiber');
+  });
+
   describe('$r', () => {
     it('should support function components', async () => {
       const Example = () => {
@@ -1877,6 +2165,12 @@ describe('InspectedElement', () => {
         Object {
           "hooks": Array [
             Object {
+              "hookSource": Object {
+                "columnNumber": "removed by Jest serializer",
+                "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+                "functionName": "Example",
+                "lineNumber": "removed by Jest serializer",
+              },
               "id": 0,
               "isStateEditable": true,
               "name": "State",
@@ -1910,6 +2204,12 @@ describe('InspectedElement', () => {
         Object {
           "hooks": Array [
             Object {
+              "hookSource": Object {
+                "columnNumber": "removed by Jest serializer",
+                "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+                "functionName": "Example",
+                "lineNumber": "removed by Jest serializer",
+              },
               "id": 0,
               "isStateEditable": true,
               "name": "State",
@@ -1943,6 +2243,12 @@ describe('InspectedElement', () => {
         Object {
           "hooks": Array [
             Object {
+              "hookSource": Object {
+                "columnNumber": "removed by Jest serializer",
+                "fileName": "react-devtools-shared/src/__tests__/inspectedElement-test.js",
+                "functionName": "Example",
+                "lineNumber": "removed by Jest serializer",
+              },
               "id": 0,
               "isStateEditable": true,
               "name": "State",
@@ -2428,7 +2734,7 @@ describe('InspectedElement', () => {
 
   describe('error boundary', () => {
     it('can toggle error', async () => {
-      class ErrorBoundary extends React.Component<any> {
+      class LocalErrorBoundary extends React.Component<any> {
         state = {hasError: false};
         static getDerivedStateFromError(error) {
           return {hasError: true};
@@ -2438,13 +2744,14 @@ describe('InspectedElement', () => {
           return hasError ? 'has-error' : this.props.children;
         }
       }
+
       const Example = () => 'example';
 
       await utils.actAsync(() =>
         legacyRender(
-          <ErrorBoundary>
+          <LocalErrorBoundary>
             <Example />
-          </ErrorBoundary>,
+          </LocalErrorBoundary>,
           document.createElement('div'),
         ),
       );
@@ -2453,11 +2760,15 @@ describe('InspectedElement', () => {
         0,
       ): any): number);
       const inspect = index => {
-        // HACK: Recreate TestRenderer instance so we can inspect different
-        // elements
-        testRendererInstance = TestRenderer.create(null, {
-          unstable_isConcurrent: true,
-        });
+        // HACK: Recreate TestRenderer instance so we can inspect different elements
+        utils.withErrorsOrWarningsIgnored(
+          ['An update to %s inside a test was not wrapped in act'],
+          () => {
+            testRendererInstance = TestRenderer.create(null, {
+              unstable_isConcurrent: true,
+            });
+          },
+        );
         return inspectElementAtIndex(index);
       };
       const toggleError = async forceError => {
@@ -2490,8 +2801,17 @@ describe('InspectedElement', () => {
         targetErrorBoundaryID,
       );
 
+      // Suppress expected error and warning.
+      const originalError = console.error;
+      const originalWarn = console.warn;
+      console.error = () => {};
+      console.warn = () => {};
+
       // now force error state on <Example />
       await toggleError(true);
+
+      console.error = originalError;
+      console.warn = originalWarn;
 
       // we are in error state now, <Example /> won't show up
       withErrorsOrWarningsIgnored(['Invalid index'], () => {

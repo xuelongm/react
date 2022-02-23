@@ -23,6 +23,7 @@ import {
   injectIntoDevTools,
   getPublicRootInstance,
 } from 'react-reconciler/src/ReactFiberReconciler';
+import {getInspectorDataForInstance} from './ReactNativeFiberInspector';
 
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {setBatchingImplementation} from './legacy-events/ReactGenericBatching';
@@ -194,6 +195,12 @@ function sendAccessibilityEvent(handle: any, eventType: string) {
   }
 }
 
+function onRecoverableError(error) {
+  // TODO: Expose onRecoverableError option to userspace
+  // eslint-disable-next-line react-internal/no-production-logging, react-internal/warning-args
+  console.error(error);
+}
+
 function render(
   element: Element<ElementType>,
   containerTag: number,
@@ -211,6 +218,9 @@ function render(
       false,
       null,
       false,
+      null,
+      '',
+      onRecoverableError,
       null,
     );
     roots.set(containerTag, root);
@@ -260,6 +270,9 @@ export {
   unmountComponentAtNode,
   stopSurface,
   createPortal,
+  // This export is typically undefined in production builds.
+  // See the "enableGetInspectorDataForInstanceInProduction" flag.
+  getInspectorDataForInstance,
 };
 
 injectIntoDevTools({

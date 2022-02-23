@@ -1,4 +1,5 @@
-Intrested in contributing to React DevTools, but not sure where to start? This is the place!
+
+Interested in contributing to React DevTools, but not sure where to start? This is the place!
 
 # Install project dependencies
 To get started, check out the React repo:
@@ -56,11 +57,21 @@ Some changes requiring testing in the browser extension (e.g. like "named hooks"
 ```sh
 cd <react-repo>
 cd packages/react-devtools-extensions
-yarn build:chrome && yarn test:chrome
+yarn build:chrome:local && yarn test:chrome
 ```
 This will launch a standalone version of Chrome with the locally built React DevTools pre-installed. If you are testing a specific URL, you can make your testing even faster by passing the `--url` argument to the test script:
 ```sh
 yarn build:chrome && yarn test:chrome --url=<url-to-test>
+```
+
+# Unit tests
+Core DevTools functionality is typically unit tested (see [here](https://github.com/facebook/react/tree/main/packages/react-devtools-shared/src/__tests__) and [here](https://github.com/facebook/react/tree/main/packages/react-devtools-extensions/src/__tests__)). To run tests, you'll first need to build or download React and React DOM ([as explained above](#build-react-and-react-dom)) and then use the following NPM script:
+```sh
+yarn test-build-devtools
+```
+You can connect tests to a debugger as well if you'd like by running:
+```sh
+yarn debug-test-build-devtools
 ```
 
 # Finding the right first issue

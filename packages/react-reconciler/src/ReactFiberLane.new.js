@@ -17,15 +17,15 @@ export type Lane = number;
 export type LaneMap<T> = Array<T>;
 
 import {
-  enableCache,
   enableSchedulingProfiler,
   enableUpdaterTracking,
   allowConcurrentByDefault,
 } from 'shared/ReactFeatureFlags';
 import {isDevToolsPresent} from './ReactFiberDevToolsHook.new';
 import {ConcurrentUpdatesByDefaultMode, NoMode} from './ReactTypeOfMode';
+import {clz32} from './clz32';
 
-// Lane values below should be kept in sync with getLabelsForLanes(), used by react-devtools-scheduling-profiler.
+// Lane values below should be kept in sync with getLabelForLane(), used by react-devtools-timeline.
 // If those values are changed that package should be rebuilt and redeployed.
 
 export const TotalLanes = 31;
@@ -78,48 +78,46 @@ export const IdleLane: Lanes = /*                       */ 0b0100000000000000000
 
 export const OffscreenLane: Lane = /*                   */ 0b1000000000000000000000000000000;
 
-// This function is used for the experimental scheduling profiler (react-devtools-scheduling-profiler)
+// This function is used for the experimental timeline (react-devtools-timeline)
 // It should be kept in sync with the Lanes values above.
-export function getLabelsForLanes(lanes: Lanes): Array<string> | void {
+export function getLabelForLane(lane: Lane): string | void {
   if (enableSchedulingProfiler) {
-    const labels = [];
-    if (lanes & SyncLane) {
-      labels.push('Sync');
+    if (lane & SyncLane) {
+      return 'Sync';
     }
-    if (lanes & InputContinuousHydrationLane) {
-      labels.push('InputContinuousHydration');
+    if (lane & InputContinuousHydrationLane) {
+      return 'InputContinuousHydration';
     }
-    if (lanes & InputContinuousLane) {
-      labels.push('InputContinuous');
+    if (lane & InputContinuousLane) {
+      return 'InputContinuous';
     }
-    if (lanes & DefaultHydrationLane) {
-      labels.push('DefaultHydration');
+    if (lane & DefaultHydrationLane) {
+      return 'DefaultHydration';
     }
-    if (lanes & DefaultLane) {
-      labels.push('Default');
+    if (lane & DefaultLane) {
+      return 'Default';
     }
-    if (lanes & TransitionHydrationLane) {
-      labels.push('TransitionHydration');
+    if (lane & TransitionHydrationLane) {
+      return 'TransitionHydration';
     }
-    if (lanes & TransitionLanes) {
-      labels.push('Transition(s)');
+    if (lane & TransitionLanes) {
+      return 'Transition';
     }
-    if (lanes & RetryLanes) {
-      labels.push('Retry(s)');
+    if (lane & RetryLanes) {
+      return 'Retry';
     }
-    if (lanes & SelectiveHydrationLane) {
-      labels.push('SelectiveHydration');
+    if (lane & SelectiveHydrationLane) {
+      return 'SelectiveHydration';
     }
-    if (lanes & IdleHydrationLane) {
-      labels.push('IdleHydration');
+    if (lane & IdleHydrationLane) {
+      return 'IdleHydration';
     }
-    if (lanes & IdleLane) {
-      labels.push('Idle');
+    if (lane & IdleLane) {
+      return 'Idle';
     }
-    if (lanes & OffscreenLane) {
-      labels.push('Offscreen');
+    if (lane & OffscreenLane) {
+      return 'Offscreen';
     }
-    return labels;
   }
 }
 
@@ -445,6 +443,10 @@ export function getLanesToRetrySynchronouslyOnError(root: FiberRoot): Lanes {
   return NoLanes;
 }
 
+export function includesSyncLane(lanes: Lanes) {
+  return (lanes & SyncLane) !== NoLanes;
+}
+
 export function includesNonIdleWork(lanes: Lanes) {
   return (lanes & NonIdleLanes) !== NoLanes;
 }
@@ -455,27 +457,26 @@ export function includesOnlyTransitions(lanes: Lanes) {
   return (lanes & TransitionLanes) === lanes;
 }
 
-export function shouldTimeSlice(root: FiberRoot, lanes: Lanes) {
-  if ((lanes & root.expiredLanes) !== NoLanes) {
-    // At least one of these lanes expired. To prevent additional starvation,
-    // finish rendering without yielding execution.
-    return false;
-  }
-
+export function includesBlockingLane(root: FiberRoot, lanes: Lanes) {
   if (
     allowConcurrentByDefault &&
     (root.current.mode & ConcurrentUpdatesByDefaultMode) !== NoMode
   ) {
     // Concurrent updates by default always use time slicing.
-    return true;
+    return false;
   }
-
   const SyncDefaultLanes =
     InputContinuousHydrationLane |
     InputContinuousLane |
     DefaultHydrationLane |
     DefaultLane;
-  return (lanes & SyncDefaultLanes) === NoLanes;
+  return (lanes & SyncDefaultLanes) !== NoLanes;
+}
+
+export function includesExpiredLane(root: FiberRoot, lanes: Lanes) {
+  // This is a separate check from includesBlockingLane because a lane can
+  // expire after a render has already started.
+  return (lanes & root.expiredLanes) !== NoLanes;
 }
 
 export function isTransitionLane(lane: Lane) {
@@ -638,15 +639,6 @@ export function markRootFinished(root: FiberRoot, remainingLanes: Lanes) {
 
   root.entangledLanes &= remainingLanes;
 
-  if (enableCache) {
-    const pooledCacheLanes = (root.pooledCacheLanes &= remainingLanes);
-    if (pooledCacheLanes === NoLanes) {
-      // None of the remaining work relies on the cache pool. Clear it so
-      // subsequent requests get a new cache.
-      root.pooledCache = null;
-    }
-  }
-
   const entanglements = root.entanglements;
   const eventTimes = root.eventTimes;
   const expirationTimes = root.expirationTimes;
@@ -803,18 +795,4 @@ export function movePendingFibersToMemoized(root: FiberRoot, lanes: Lanes) {
 
     lanes &= ~lane;
   }
-}
-
-const clz32 = Math.clz32 ? Math.clz32 : clz32Fallback;
-
-// Count leading zeros. Only used on lanes, so assume input is an integer.
-// Based on:
-// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/clz32
-const log = Math.log;
-const LN2 = Math.LN2;
-function clz32Fallback(lanes: Lanes | Lane) {
-  if (lanes === 0) {
-    return 32;
-  }
-  return (31 - ((log(lanes) / LN2) | 0)) | 0;
 }

@@ -23,9 +23,10 @@ export const enableUpdaterTracking = false;
 export const enableSuspenseServerRenderer = false;
 export const enableSelectiveHydration = false;
 export const enableLazyElements = false;
-export const enableCache = false;
+export const enableCache = true;
 export const enableSchedulerDebugging = false;
 export const disableJavaScriptURLs = false;
+export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
 export const enableScopeAPI = true;
 export const enableCreateEventHandleAPI = false;
@@ -39,14 +40,18 @@ export const disableTextareaChildren = false;
 export const disableModulePatternComponents = true;
 export const warnUnstableRenderSubtreeIntoContainer = false;
 export const warnAboutSpreadingKeyToJSX = false;
+export const warnOnSubscriptionInsideStartTransition = false;
+export const enableSuspenseAvoidThisFallback = true;
+export const enableSuspenseAvoidThisFallbackFizz = false;
+export const enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay = true;
+export const enableClientRenderFallbackOnHydrationMismatch = true;
 export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = false;
 export const disableNativeComponentFrames = false;
-export const skipUnmountedBoundaries = false;
 export const deletedTreeCleanUpLevel = 3;
 export const enableSuspenseLayoutEffectSemantics = false;
-
+export const enableGetInspectorDataForInstanceInProduction = false;
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = false;
 
@@ -54,11 +59,19 @@ export const enableStrictEffects = true;
 export const createRootStrictEffectsByDefault = false;
 export const enableUseRefAccessWarning = false;
 
-export const enableRecursiveCommitTraversal = false;
 export const disableSchedulerTimeoutInWorkLoop = false;
 export const enableLazyContextPropagation = false;
 export const enableSyncDefaultUpdates = true;
 export const allowConcurrentByDefault = true;
+export const enablePersistentOffscreenHostContainer = false;
+export const enableCustomElementPropertySupport = false;
+
+export const consoleManagedByDevToolsDuringStrictMode = false;
+
+// Some www surfaces are still using this. Remove once they have been migrated.
+export const enableUseMutableSource = true;
+
+export const enableTransitionTracing = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

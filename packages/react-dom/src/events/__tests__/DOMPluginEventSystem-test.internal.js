@@ -629,8 +629,7 @@ describe('DOMPluginEventSystem', () => {
           suspend = true;
 
           // Hydrate asynchronously.
-          const root = ReactDOM.createRoot(childContainer, {hydrate: true});
-          root.render(<App />);
+          ReactDOM.hydrateRoot(childContainer, <App />);
           jest.runAllTimers();
           Scheduler.unstable_flushAll();
 
@@ -649,7 +648,16 @@ describe('DOMPluginEventSystem', () => {
 
           // We're now full hydrated.
 
-          expect(clicks).toBe(1);
+          if (
+            gate(
+              flags =>
+                flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+            )
+          ) {
+            expect(clicks).toBe(0);
+          } else {
+            expect(clicks).toBe(1);
+          }
 
           document.body.removeChild(parentContainer);
         });

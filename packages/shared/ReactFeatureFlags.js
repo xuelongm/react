@@ -16,7 +16,7 @@ export const enableFilterEmptyStringAttributesDOM = false;
 export const enableDebugTracing = false;
 
 // Adds user timing marks for e.g. state updates, suspense, and work loop stuff,
-// for an experimental scheduling profiler tool.
+// for an experimental timeline tool.
 export const enableSchedulingProfiler = __PROFILE__;
 
 // Helps identify side effects in render-phase lifecycle hooks and setState
@@ -68,6 +68,10 @@ export const enableSchedulerDebugging = false;
 // Disable javascript: URL strings in href for XSS protection.
 export const disableJavaScriptURLs = false;
 
+// Disable support for comment nodes as React DOM containers. Only supported
+// by www builds.
+export const disableCommentsAsDOMContainers = true;
+
 // Experimental Scope support.
 export const enableScopeAPI = false;
 
@@ -99,17 +103,23 @@ export const enableTrustedTypesIntegration = false;
 // a deprecated pattern we want to get rid of in the future
 export const warnAboutSpreadingKeyToJSX = false;
 
+export const warnOnSubscriptionInsideStartTransition = false;
+
+export const enableSuspenseAvoidThisFallback = false;
+export const enableSuspenseAvoidThisFallbackFizz = false;
+
+export const enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay = true;
+
+export const enableClientRenderFallbackOnHydrationMismatch = true;
+
 export const enableComponentStackLocations = true;
 
 export const enableNewReconciler = false;
 
 export const disableNativeComponentFrames = false;
 
-// Errors that are thrown while unmounting (or after in the case of passive effects)
-// should bypass any error boundaries that are also unmounting (or have unmounted)
-// and be handled by the nearest still-mounted boundary.
-// If there are no still-mounted boundaries, the errors should be rethrown.
-export const skipUnmountedBoundaries = false;
+// Internal only.
+export const enableGetInspectorDataForInstanceInProduction = false;
 
 // When a node is unmounted, recurse into the Fiber subtree and clean out
 // references. Each level cleans up more fiber fields than the previous level.
@@ -128,6 +138,12 @@ export const deletedTreeCleanUpLevel = 3;
 // and recreate them when they are shown again (after the suspended boundary has resolved).
 // Note that this should be an uncommon use case and can be avoided by using the transition API.
 export const enableSuspenseLayoutEffectSemantics = true;
+
+// Changes the behavior for rendering custom elements in both server rendering
+// and client rendering, mostly to allow JSX attributes to apply to the custom
+// element's object properties instead of only HTML attributes.
+// https://github.com/facebook/react/issues/11347
+export const enableCustomElementPropertySupport = __EXPERIMENTAL__;
 
 // --------------------------
 // Future APIs to be deprecated
@@ -161,8 +177,6 @@ export const deferRenderPhaseUpdateToNextBatch = false;
 
 export const enableUseRefAccessWarning = false;
 
-export const enableRecursiveCommitTraversal = false;
-
 export const disableSchedulerTimeoutInWorkLoop = false;
 
 export const enableLazyContextPropagation = false;
@@ -170,3 +184,12 @@ export const enableLazyContextPropagation = false;
 export const enableSyncDefaultUpdates = true;
 
 export const allowConcurrentByDefault = false;
+
+export const enablePersistentOffscreenHostContainer = false;
+
+export const consoleManagedByDevToolsDuringStrictMode = true;
+
+// Only enabled in www builds
+export const enableUseMutableSource = false;
+
+export const enableTransitionTracing = false;

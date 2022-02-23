@@ -14,10 +14,9 @@ import type {RootTag} from './ReactRootTags';
 import type {WorkTag} from './ReactWorkTags';
 import type {TypeOfMode} from './ReactTypeOfMode';
 import type {Lanes} from './ReactFiberLane.new';
-import type {SuspenseInstance} from './ReactFiberHostConfig';
+import type {SuspenseInstance, Props} from './ReactFiberHostConfig';
 import type {OffscreenProps} from './ReactFiberOffscreenComponent';
 
-import invariant from 'shared/invariant';
 import {
   createRootStrictEffectsByDefault,
   enableCache,
@@ -26,7 +25,12 @@ import {
   enableScopeAPI,
   enableSyncDefaultUpdates,
   allowConcurrentByDefault,
+  enableTransitionTracing,
 } from 'shared/ReactFeatureFlags';
+import {
+  supportsPersistence,
+  getOffscreenContainerType,
+} from './ReactFiberHostConfig';
 import {NoFlags, Placement, StaticMask} from './ReactFiberFlags';
 import {ConcurrentRoot} from './ReactRootTags';
 import {
@@ -53,6 +57,7 @@ import {
   OffscreenComponent,
   LegacyHiddenComponent,
   CacheComponent,
+  TracingMarkerComponent,
 } from './ReactWorkTags';
 import getComponentNameFromFiber from 'react-reconciler/src/getComponentNameFromFiber';
 
@@ -88,6 +93,7 @@ import {
   REACT_OFFSCREEN_TYPE,
   REACT_LEGACY_HIDDEN_TYPE,
   REACT_CACHE_TYPE,
+  REACT_TRACING_MARKER_TYPE,
 } from 'shared/ReactSymbols';
 
 export type {Fiber};
@@ -518,6 +524,11 @@ export function createFiberFromTypeAndProps(
           return createFiberFromCache(pendingProps, mode, lanes, key);
         }
       // eslint-disable-next-line no-fallthrough
+      case REACT_TRACING_MARKER_TYPE:
+        if (enableTransitionTracing) {
+          return createFiberFromTracingMarker(pendingProps, mode, lanes, key);
+        }
+      // eslint-disable-next-line no-fallthrough
       default: {
         if (typeof type === 'object' && type !== null) {
           switch (type.$$typeof) {
@@ -561,13 +572,11 @@ export function createFiberFromTypeAndProps(
             info += '\n\nCheck the render method of `' + ownerName + '`.';
           }
         }
-        invariant(
-          false,
+
+        throw new Error(
           'Element type is invalid: expected a string (for built-in ' +
             'components) or a class/function (for composite components) ' +
-            'but got: %s.%s',
-          type == null ? type : typeof type,
-          info,
+            `but got: ${type == null ? type : typeof type}.${info}`,
         );
       }
     }
@@ -583,6 +592,25 @@ export function createFiberFromTypeAndProps(
   }
 
   return fiber;
+}
+
+export function createOffscreenHostContainerFiber(
+  props: Props,
+  fiberMode: TypeOfMode,
+  lanes: Lanes,
+  key: null | string,
+): Fiber {
+  if (supportsPersistence) {
+    const type = getOffscreenContainerType();
+    const fiber = createFiber(HostComponent, props, key, fiberMode);
+    fiber.elementType = type;
+    fiber.type = type;
+    fiber.lanes = lanes;
+    return fiber;
+  } else {
+    // Only implemented in persistent mode
+    throw new Error('Not implemented.');
+  }
 }
 
 export function createFiberFromElement(
@@ -722,6 +750,18 @@ export function createFiberFromCache(
 ) {
   const fiber = createFiber(CacheComponent, pendingProps, key, mode);
   fiber.elementType = REACT_CACHE_TYPE;
+  fiber.lanes = lanes;
+  return fiber;
+}
+
+export function createFiberFromTracingMarker(
+  pendingProps: any,
+  mode: TypeOfMode,
+  lanes: Lanes,
+  key: null | string,
+) {
+  const fiber = createFiber(TracingMarkerComponent, pendingProps, key, mode);
+  fiber.elementType = REACT_TRACING_MARKER_TYPE;
   fiber.lanes = lanes;
   return fiber;
 }

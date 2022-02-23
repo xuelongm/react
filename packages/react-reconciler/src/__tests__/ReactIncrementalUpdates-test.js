@@ -196,11 +196,13 @@ describe('ReactIncrementalUpdates', () => {
       // Now flush the remaining work. Even though e and f were already processed,
       // they should be processed again, to ensure that the terminal state
       // is deterministic.
-      // TODO: should d, e, f be flushed again first?
       expect(Scheduler).toFlushAndYield([
+        // Since 'g' is in a transition, we'll process 'd' separately first.
+        // That causes us to process 'd' with 'e' and 'f' rebased.
         'd',
         'e',
         'f',
+        // Then we'll re-process everything for 'g'.
         'a',
         'b',
         'c',
@@ -290,8 +292,6 @@ describe('ReactIncrementalUpdates', () => {
       });
 
       // The sync updates should have flushed, but not the async ones.
-      // TODO: should 'd' have flushed?
-      // TODO: should 'f' have flushed? I don't know what enqueueReplaceState is.
       expect(Scheduler).toHaveYielded(['e', 'f']);
       expect(ReactNoop.getChildren()).toEqual([span('f')]);
 
@@ -299,9 +299,12 @@ describe('ReactIncrementalUpdates', () => {
       // they should be processed again, to ensure that the terminal state
       // is deterministic.
       expect(Scheduler).toFlushAndYield([
+        // Since 'g' is in a transition, we'll process 'd' separately first.
+        // That causes us to process 'd' with 'e' and 'f' rebased.
         'd',
         'e',
         'f',
+        // Then we'll re-process everything for 'g'.
         'a',
         'b',
         'c',
@@ -670,7 +673,7 @@ describe('ReactIncrementalUpdates', () => {
       root.render(<App />);
     });
     expect(Scheduler).toHaveYielded(['Committed: ']);
-    expect(root).toMatchRenderedOutput('');
+    expect(root).toMatchRenderedOutput(null);
 
     await act(async () => {
       if (gate(flags => flags.enableSyncDefaultUpdates)) {
@@ -731,7 +734,7 @@ describe('ReactIncrementalUpdates', () => {
       root.render(<App />);
     });
     expect(Scheduler).toHaveYielded([]);
-    expect(root).toMatchRenderedOutput('');
+    expect(root).toMatchRenderedOutput(null);
 
     await act(async () => {
       if (gate(flags => flags.enableSyncDefaultUpdates)) {

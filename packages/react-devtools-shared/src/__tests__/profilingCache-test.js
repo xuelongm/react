@@ -108,7 +108,10 @@ describe('ProfilingCache', () => {
       });
     }
 
-    expect(allProfilingDataForRoots).toHaveLength(3);
+    // No profiling data gets logged for the 2nd root (container B)
+    // because it doesn't render anything while profiling.
+    // (Technically it unmounts but we don't profile root unmounts.)
+    expect(allProfilingDataForRoots).toHaveLength(2);
 
     utils.exportImportHelper(bridge, store);
 
@@ -311,6 +314,7 @@ describe('ProfilingCache', () => {
 
   it('should properly detect changed hooks', () => {
     const Context = React.createContext(0);
+    const Context2 = React.createContext(0);
 
     function reducer(state, action) {
       switch (action.type) {
@@ -332,6 +336,7 @@ describe('ProfilingCache', () => {
       // This hook's return value may change between renders,
       // but the hook itself isn't stateful.
       React.useContext(Context);
+      React.useContext(Context2);
 
       // These hooks and their dependencies may not change between renders.
       // We're using them to ensure that they don't trigger false positives.
@@ -351,7 +356,9 @@ describe('ProfilingCache', () => {
     utils.act(() =>
       legacyRender(
         <Context.Provider value={true}>
-          <Component count={1} />
+          <Context2.Provider value={true}>
+            <Component count={1} />
+          </Context2.Provider>
         </Context.Provider>,
         container,
       ),
@@ -361,7 +368,9 @@ describe('ProfilingCache', () => {
     utils.act(() =>
       legacyRender(
         <Context.Provider value={true}>
-          <Component count={2} />
+          <Context2.Provider value={true}>
+            <Component count={2} />
+          </Context2.Provider>
         </Context.Provider>,
         container,
       ),
@@ -373,17 +382,29 @@ describe('ProfilingCache', () => {
     // Fourth render has a changed state hook
     utils.act(() => setState('def'));
 
-    // Fifth render has a changed context value, but no changed hook.
-    // Technically, DevTools will miss this "context" change since it only tracks legacy context.
+    // Fifth render has a changed context value for context 1, but no changed hook.
     utils.act(() =>
       legacyRender(
         <Context.Provider value={false}>
-          <Component count={2} />
+          <Context2.Provider value={true}>
+            <Component count={2} />
+          </Context2.Provider>
         </Context.Provider>,
         container,
       ),
     );
 
+    // Sixth render has another changed context value for context 2, but no changed hook.
+    utils.act(() =>
+      legacyRender(
+        <Context.Provider value={false}>
+          <Context2.Provider value={false}>
+            <Component count={2} />
+          </Context2.Provider>
+        </Context.Provider>,
+        container,
+      ),
+    );
     utils.act(() => store.profilerStore.stopProfiling());
 
     const allCommitData = [];
@@ -403,7 +424,7 @@ describe('ProfilingCache', () => {
 
     const rootID = store.roots[0];
 
-    for (let commitIndex = 0; commitIndex < 5; commitIndex++) {
+    for (let commitIndex = 0; commitIndex < 6; commitIndex++) {
       utils.act(() => {
         TestRenderer.create(
           <Validator
@@ -415,12 +436,12 @@ describe('ProfilingCache', () => {
       });
     }
 
-    expect(allCommitData).toHaveLength(5);
+    expect(allCommitData).toHaveLength(6);
 
     // Export and re-import profile data and make sure it is retained.
     utils.exportImportHelper(bridge, store);
 
-    for (let commitIndex = 0; commitIndex < 5; commitIndex++) {
+    for (let commitIndex = 0; commitIndex < 6; commitIndex++) {
       utils.act(() => {
         TestRenderer.create(
           <Validator
@@ -672,7 +693,7 @@ describe('ProfilingCache', () => {
 
     const About = () => <div>About</div>;
 
-    // Mimics https://github.com/ReactTraining/react-router/blob/main/packages/react-router/modules/Router.js
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router/modules/Router.js
     function Router({children}) {
       const [path, setPath] = React.useState('/');
       return (
@@ -682,7 +703,7 @@ describe('ProfilingCache', () => {
       );
     }
 
-    // Mimics https://github.com/ReactTraining/react-router/blob/main/packages/react-router/modules/Switch.js
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router/modules/Switch.js
     function Switch({children}) {
       return (
         <RouterContext.Consumer>
@@ -699,14 +720,14 @@ describe('ProfilingCache', () => {
       );
     }
 
-    // Mimics https://github.com/ReactTraining/react-router/blob/main/packages/react-router/modules/Route.js
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router/modules/Route.js
     function Route({children, path}) {
       return null;
     }
 
     const linkRef = React.createRef();
 
-    // Mimics https://github.com/ReactTraining/react-router/blob/main/packages/react-router-dom/modules/Link.js
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router-dom/modules/Link.js
     function Link({children, path}) {
       return (
         <RouterContext.Consumer>
@@ -730,5 +751,98 @@ describe('ProfilingCache', () => {
     utils.act(() => Simulate.click(linkRef.current));
     utils.act(() => store.profilerStore.stopProfiling());
     expect(container.textContent).toBe('About');
+  });
+
+  it('components that were deleted and added to updaters during the layout phase should not crash', () => {
+    let setChildUnmounted;
+    function Child() {
+      const [, setState] = React.useState(false);
+
+      React.useLayoutEffect(() => {
+        return () => setState(true);
+      });
+
+      return null;
+    }
+
+    function App() {
+      const [childUnmounted, _setChildUnmounted] = React.useState(false);
+      setChildUnmounted = _setChildUnmounted;
+      return <>{!childUnmounted && <Child />}</>;
+    }
+
+    const root = ReactDOM.createRoot(document.createElement('div'));
+    utils.act(() => root.render(<App />));
+    utils.act(() => store.profilerStore.startProfiling());
+    utils.act(() => setChildUnmounted(true));
+    utils.act(() => store.profilerStore.stopProfiling());
+
+    const updaters = store.profilerStore.getCommitData(store.roots[0], 0)
+      .updaters;
+    expect(updaters.length).toEqual(1);
+    expect(updaters[0].displayName).toEqual('App');
+  });
+
+  it('components in a deleted subtree and added to updaters during the layout phase should not crash', () => {
+    let setChildUnmounted;
+    function Child() {
+      return <GrandChild />;
+    }
+
+    function GrandChild() {
+      const [, setState] = React.useState(false);
+
+      React.useLayoutEffect(() => {
+        return () => setState(true);
+      });
+
+      return null;
+    }
+
+    function App() {
+      const [childUnmounted, _setChildUnmounted] = React.useState(false);
+      setChildUnmounted = _setChildUnmounted;
+      return <>{!childUnmounted && <Child />}</>;
+    }
+
+    const root = ReactDOM.createRoot(document.createElement('div'));
+    utils.act(() => root.render(<App />));
+    utils.act(() => store.profilerStore.startProfiling());
+    utils.act(() => setChildUnmounted(true));
+    utils.act(() => store.profilerStore.stopProfiling());
+
+    const updaters = store.profilerStore.getCommitData(store.roots[0], 0)
+      .updaters;
+    expect(updaters.length).toEqual(1);
+    expect(updaters[0].displayName).toEqual('App');
+  });
+
+  it('components that were deleted should not be added to updaters during the passive phase', () => {
+    let setChildUnmounted;
+    function Child() {
+      const [, setState] = React.useState(false);
+      React.useEffect(() => {
+        return () => setState(true);
+      });
+
+      return null;
+    }
+
+    function App() {
+      const [childUnmounted, _setChildUnmounted] = React.useState(false);
+      setChildUnmounted = _setChildUnmounted;
+      return <>{!childUnmounted && <Child />}</>;
+    }
+
+    const root = ReactDOM.createRoot(document.createElement('div'));
+    utils.act(() => root.render(<App />));
+    utils.act(() => store.profilerStore.startProfiling());
+    utils.act(() => setChildUnmounted(true));
+    utils.act(() => store.profilerStore.stopProfiling());
+
+    const updaters = store.profilerStore.getCommitData(store.roots[0], 0)
+      .updaters;
+    expect(updaters.length).toEqual(1);
+    expect(updaters[0].displayName).toEqual('App');
   });
 });
