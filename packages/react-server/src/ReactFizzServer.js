@@ -31,6 +31,7 @@ import {
   scheduleWork,
   beginWriting,
   writeChunk,
+  writeChunkAndReturn,
   completeWriting,
   flushBuffered,
   close,
@@ -116,6 +117,7 @@ import {
   enableSuspenseAvoidThisFallbackFizz,
 } from 'shared/ReactFeatureFlags';
 
+import assign from 'shared/assign';
 import getComponentNameFromType from 'shared/getComponentNameFromType';
 import isArray from 'shared/isArray';
 
@@ -192,16 +194,17 @@ export opaque type Request = {
   partialBoundaries: Array<SuspenseBoundary>, // Partially completed boundaries that can flush its segments early.
   // onError is called when an error happens anywhere in the tree. It might recover.
   onError: (error: mixed) => void,
-  // onCompleteAll is called when all pending task is done but it may not have flushed yet.
+  // onAllReady is called when all pending task is done but it may not have flushed yet.
   // This is a good time to start writing if you want only HTML and no intermediate steps.
-  onCompleteAll: () => void,
-  // onCompleteShell is called when there is at least a root fallback ready to show.
+  onAllReady: () => void,
+  // onShellReady is called when there is at least a root fallback ready to show.
   // Typically you don't need this callback because it's best practice to always have a
   // root fallback ready so there's no need to wait.
-  onCompleteShell: () => void,
-  // onErrorShell is called when the shell didn't complete. That means you probably want to
+  onShellReady: () => void,
+  // onShellError is called when the shell didn't complete. That means you probably want to
   // emit a different response to the stream instead.
-  onErrorShell: (error: mixed) => void,
+  onShellError: (error: mixed) => void,
+  onFatalError: (error: mixed) => void,
 };
 
 // This is a default heuristic for how to split up the HTML content into progressive
@@ -233,9 +236,10 @@ export function createRequest(
   rootFormatContext: FormatContext,
   progressiveChunkSize: void | number,
   onError: void | ((error: mixed) => void),
-  onCompleteAll: void | (() => void),
-  onCompleteShell: void | (() => void),
-  onErrorShell: void | ((error: mixed) => void),
+  onAllReady: void | (() => void),
+  onShellReady: void | (() => void),
+  onShellError: void | ((error: mixed) => void),
+  onFatalError: void | ((error: mixed) => void),
 ): Request {
   const pingedTasks = [];
   const abortSet: Set<Task> = new Set();
@@ -258,9 +262,10 @@ export function createRequest(
     completedBoundaries: [],
     partialBoundaries: [],
     onError: onError === undefined ? defaultErrorHandler : onError,
-    onCompleteAll: onCompleteAll === undefined ? noop : onCompleteAll,
-    onCompleteShell: onCompleteShell === undefined ? noop : onCompleteShell,
-    onErrorShell: onErrorShell === undefined ? noop : onErrorShell,
+    onAllReady: onAllReady === undefined ? noop : onAllReady,
+    onShellReady: onShellReady === undefined ? noop : onShellReady,
+    onShellError: onShellError === undefined ? noop : onShellError,
+    onFatalError: onFatalError === undefined ? noop : onFatalError,
   };
   // This segment represents the root fallback.
   const rootSegment = createPendingSegment(request, 0, null, rootFormatContext);
@@ -417,8 +422,10 @@ function fatalError(request: Request, error: mixed): void {
   // This is called outside error handling code such as if the root errors outside
   // a suspense boundary or if the root suspense boundary's fallback errors.
   // It's also called if React itself or its host configs errors.
-  const onErrorShell = request.onErrorShell;
-  onErrorShell(error);
+  const onShellError = request.onShellError;
+  onShellError(error);
+  const onFatalError = request.onFatalError;
+  onFatalError(error);
   if (request.destination !== null) {
     request.status = CLOSED;
     closeWithError(request.destination, error);
@@ -836,7 +843,7 @@ function validateFunctionComponentInDev(Component: any): void {
 function resolveDefaultProps(Component: any, baseProps: Object): Object {
   if (Component && Component.defaultProps) {
     // Resolve default props. Taken from ReactElement
-    const props = Object.assign({}, baseProps);
+    const props = assign({}, baseProps);
     const defaultProps = Component.defaultProps;
     for (const propName in defaultProps) {
       if (props[propName] === undefined) {
@@ -1366,8 +1373,8 @@ function erroredTask(
 
   request.allPendingTasks--;
   if (request.allPendingTasks === 0) {
-    const onCompleteAll = request.onCompleteAll;
-    onCompleteAll();
+    const onAllReady = request.onAllReady;
+    onAllReady();
   }
 }
 
@@ -1417,8 +1424,8 @@ function abortTask(task: Task): void {
 
     request.allPendingTasks--;
     if (request.allPendingTasks === 0) {
-      const onCompleteAll = request.onCompleteAll;
-      onCompleteAll();
+      const onAllReady = request.onAllReady;
+      onAllReady();
     }
   }
 }
@@ -1441,9 +1448,9 @@ function finishedTask(
     request.pendingRootTasks--;
     if (request.pendingRootTasks === 0) {
       // We have completed the shell so the shell can't error anymore.
-      request.onErrorShell = noop;
-      const onCompleteShell = request.onCompleteShell;
-      onCompleteShell();
+      request.onShellError = noop;
+      const onShellReady = request.onShellReady;
+      onShellReady();
     }
   } else {
     boundary.pendingTasks--;
@@ -1494,8 +1501,8 @@ function finishedTask(
   if (request.allPendingTasks === 0) {
     // This needs to be called at the very end so that we can synchronously write the result
     // in the callback if needed.
-    const onCompleteAll = request.onCompleteAll;
-    onCompleteAll();
+    const onAllReady = request.onAllReady;
+    onAllReady();
   }
 }
 
@@ -1615,8 +1622,11 @@ function flushSubtree(
         r = flushSegment(request, destination, nextChild);
       }
       // Finally just write all the remaining chunks
-      for (; chunkIdx < chunks.length; chunkIdx++) {
-        r = writeChunk(destination, chunks[chunkIdx]);
+      for (; chunkIdx < chunks.length - 1; chunkIdx++) {
+        writeChunk(destination, chunks[chunkIdx]);
+      }
+      if (chunkIdx < chunks.length) {
+        r = writeChunkAndReturn(destination, chunks[chunkIdx]);
       }
       return r;
     }
@@ -1948,6 +1958,10 @@ export function startFlowing(request: Request, destination: Destination): void {
     return;
   }
   if (request.status === CLOSED) {
+    return;
+  }
+  if (request.destination !== null) {
+    // We're already flowing.
     return;
   }
   request.destination = destination;

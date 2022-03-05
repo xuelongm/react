@@ -32,31 +32,41 @@ type Options = {|
   bootstrapModules?: Array<string>,
   progressiveChunkSize?: number,
   signal?: AbortSignal,
-  onCompleteAll?: () => void,
   onError?: (error: mixed) => void,
 |};
+
+// TODO: Move to sub-classing ReadableStream.
+type ReactDOMServerReadableStream = ReadableStream & {
+  allReady: Promise<void>,
+};
 
 function renderToReadableStream(
   children: ReactNodeList,
   options?: Options,
-): Promise<ReadableStream> {
+): Promise<ReactDOMServerReadableStream> {
   return new Promise((resolve, reject) => {
-    function onCompleteShell() {
-      const stream = new ReadableStream({
+    let onFatalError;
+    let onAllReady;
+    const allReady = new Promise((res, rej) => {
+      onAllReady = res;
+      onFatalError = rej;
+    });
+
+    function onShellReady() {
+      const stream: ReactDOMServerReadableStream = (new ReadableStream({
+        type: 'bytes',
         pull(controller) {
-          // Pull is called immediately even if the stream is not passed to anything.
-          // That's buffering too early. We want to start buffering once the stream
-          // is actually used by something so we can give it the best result possible
-          // at that point.
-          if (stream.locked) {
-            startFlowing(request, controller);
-          }
+          startFlowing(request, controller);
         },
-        cancel(reason) {},
-      });
+        cancel(reason) {
+          abort(request);
+        },
+      }): any);
+      // TODO: Move to sub-classing ReadableStream.
+      stream.allReady = allReady;
       resolve(stream);
     }
-    function onErrorShell(error: mixed) {
+    function onShellError(error: mixed) {
       reject(error);
     }
     const request = createRequest(
@@ -71,9 +81,10 @@ function renderToReadableStream(
       createRootFormatContext(options ? options.namespaceURI : undefined),
       options ? options.progressiveChunkSize : undefined,
       options ? options.onError : undefined,
-      options ? options.onCompleteAll : undefined,
-      onCompleteShell,
-      onErrorShell,
+      onAllReady,
+      onShellReady,
+      onShellError,
+      onFatalError,
     );
     if (options && options.signal) {
       const signal = options.signal;
